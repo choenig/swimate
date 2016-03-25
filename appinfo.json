@@ -1,0 +1,45 @@
+{
+    "appKeys": {},
+    "capabilities": [
+        ""
+    ],
+    "companyName": "pebble@mail.hoenig.cc",
+    "enableMultiJS": true,
+    "longName": "swimate",
+    "projectType": "native",
+    "resources": {
+        "media": [
+            {
+                "type": "bitmap",
+                "name": "IMAGE_ACTION_ICON_UP",
+                "file": "images/action_icon_up.png"
+            },
+            {
+                "type": "bitmap",
+                "name": "IMAGE_ACTION_ICON_OK",
+                "file": "images/action_icon_ok.png"
+            },
+            {
+                "type": "bitmap",
+                "name": "IMAGE_ACTION_ICON_NOK",
+                "file": "images/action_icon_nok.png"
+            },
+            {
+                "type": "bitmap",
+                "name": "IMAGE_ACTION_ICON_DOWN",
+                "file": "images/action_icon_down.png"
+            }
+        ]
+    },
+    "sdkVersion": "3",
+    "shortName": "swimate",
+    "targetPlatforms": [
+        "aplite",
+        "basalt"
+    ],
+    "uuid": "2aff92af-1d9c-47af-9583-6122733ae917",
+    "versionLabel": "1.0",
+    "watchapp": {
+        "watchface": false
+    }
+}
