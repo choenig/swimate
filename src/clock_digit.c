@@ -35,8 +35,8 @@ void ClockDigit_setNumber(ClockDigit* this, int number, int fontId) {
 
   if(this->currentNum != number || this->currentFontId != fontId) {
 
-    //deallocate the old bg image
-    gbitmap_destroy(this->currentImage);
+    // remember the previous image (deleting it here made the simulator not update the UI)
+    GBitmap * prevImage = this->currentImage;
 
     //change over to the new digit image
     this->currentImageId = ClockDigit_imageIds[fontId][number];
@@ -49,6 +49,9 @@ void ClockDigit_setNumber(ClockDigit* this, int number, int fontId) {
 
     //set the layer to the new image
     bitmap_layer_set_bitmap(this->imageLayer, this->currentImage);
+
+    //now deallocate the previous image
+    gbitmap_destroy(prevImage);
   }
 
   // in case the layer was set to hidden, unhide
