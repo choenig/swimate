@@ -8,6 +8,9 @@
 #define NUM_FIRST_MENU_ITEMS 3
 #define NUM_SECOND_MENU_ITEMS 1
 
+// summary menu stuff
+#define NUM_SUMMARY_MENU_ITEMS 5
+
 // settings keys
 #define PERSIST_KEY_DESIRED_LANE_COUNT 0
 #define PERSIST_KEY_TIME_PER_LANE      1
@@ -23,6 +26,8 @@ int * currentValueToChange = NULL;
 static Window * mainMenuWindow;
 static MenuLayer * mainMenuLayer;
 static ActionBarLayer *actionBarLayer;
+static Window * summaryMenuWindow;
+static MenuLayer * summaryMenuLayer;
 
 // icons
 static GBitmap * iconUp;
@@ -37,10 +42,13 @@ static ClockDigit clockDigits[4];
 static ActionBarLayer *digitActionBarLayer;
 
 int laneCount = 0;
+time_t startTimeOfWorkout  = 0;
 time_t startTimeOfCurrentLane  = 0;
-int cumulatedPauseTime = 0;
+int cumulatedPauseTimeOfWorkout = 0;
+int cumulatedPauseTimeOfCurrentLane = 0;
 time_t startTimeOfCurrentPause = 0;
 time_t virtualEndTimeOfCurrentLane = 0;
+time_t endTimeOfWorkout  = 0;
 
 // forward declarations
 static void finishLane();
@@ -67,14 +75,13 @@ static void updateDigitActionBarLayerIcons()
 
 static void quitCurrentSwim()
 {
-    // reset all
-    laneCount = 0;
-    startTimeOfCurrentLane  = 0;
-    cumulatedPauseTime = 0;
-    startTimeOfCurrentPause = 0;
-    virtualEndTimeOfCurrentLane = 0;
+    finishLane();
+
+    const time_t now = time(NULL);
+    endTimeOfWorkout = now;
 
     window_stack_pop(false);
+    window_stack_push(summaryMenuWindow, true);
 }
 
 static void onDigitActionBarLayerBackClicked(ClickRecognizerRef recognizer, void * context)
@@ -92,10 +99,11 @@ static void onDigitActionBarLayerSelectClicked(ClickRecognizerRef recognizer, vo
     if (isNowPaused) {
         startTimeOfCurrentPause = now;
     } else {
-        cumulatedPauseTime += now - startTimeOfCurrentPause;
+        cumulatedPauseTimeOfWorkout     += now - startTimeOfCurrentPause;
+        cumulatedPauseTimeOfCurrentLane += now - startTimeOfCurrentPause;
         startTimeOfCurrentPause = 0;
 
-        virtualEndTimeOfCurrentLane = startTimeOfCurrentLane + timePerLane + cumulatedPauseTime;
+        virtualEndTimeOfCurrentLane = startTimeOfCurrentLane + timePerLane + cumulatedPauseTimeOfCurrentLane;
     }
 
     updateDigitActionBarLayerIcons();
@@ -132,10 +140,11 @@ static void finishLane()
 
     // calculate next timePerLane
     if (isPaused()) {
-        cumulatedPauseTime += now - startTimeOfCurrentPause;
+        cumulatedPauseTimeOfWorkout     += now - startTimeOfCurrentPause;
+        cumulatedPauseTimeOfCurrentLane += now - startTimeOfCurrentPause;
     }
     if (startTimeOfCurrentLane > 0) {
-        timePerLane = now - startTimeOfCurrentLane - cumulatedPauseTime;
+        timePerLane = now - startTimeOfCurrentLane - cumulatedPauseTimeOfCurrentLane;
     }
 }
 
@@ -150,7 +159,7 @@ static void startNextLane()
 
     // start new lane
     startTimeOfCurrentLane = now;
-    cumulatedPauseTime = 0;
+    cumulatedPauseTimeOfCurrentLane = 0;
 
     if (isPaused()) {
         startTimeOfCurrentPause = now;
@@ -202,9 +211,17 @@ static void onDigitWindowLoad(Window * window)
 
     action_bar_layer_add_to_window(digitActionBarLayer, window);
 
-    if (!isPaused()) {
-        startNextLane();
-    }
+    // reset all
+    laneCount = 0;
+    startTimeOfWorkout = time(NULL);
+    startTimeOfCurrentLane  = 0;
+    cumulatedPauseTimeOfWorkout = 0;
+    cumulatedPauseTimeOfCurrentLane = 0;
+    startTimeOfCurrentPause = 0;
+    virtualEndTimeOfCurrentLane = 0;
+    endTimeOfWorkout = 0;
+    startNextLane();
+
     tick_timer_service_subscribe(SECOND_UNIT, &handleSecondsTick);
 }
 
@@ -233,6 +250,127 @@ static void deinitDigitWindow()
 {
     window_destroy(digitWindow);
     digitWindow = NULL;
+}
+
+//
+// SummaryMenuLayer
+
+static uint16_t onSummaryMenuGetNumRows(MenuLayer * menuLayer, uint16_t sectionIndex, void * data)
+{
+    switch (sectionIndex) {
+    case 0:  return NUM_SUMMARY_MENU_ITEMS;
+    default: return 0;
+    }
+}
+
+static void formtTime(char * str, size_t maxlen, time_t time)
+{
+    const int hours =  time / 60 / 60;
+    const int mins  = (time / 60) % 60;
+    const int secs  =  time % 60;
+
+    if (hours == 0) {
+        snprintf(str, maxlen, "%d%d:%d%d",
+                 mins >= 10 ? mins / 10 : 0,
+                 mins % 10,
+                 secs >= 10 ? secs / 10 : 0,
+                 secs % 10
+                 );
+    } else {
+        snprintf(str, maxlen, "%d%d:%d%d:%d%d",
+                 hours >= 10 ? hours / 10 : 0,
+                 hours % 10,
+                 mins >= 10 ? mins / 10 : 0,
+                 mins % 10,
+                 secs >= 10 ? secs / 10 : 0,
+                 secs % 10
+                 );    }
+}
+
+static void onSummaryMenuDrawRow(GContext* ctx, const Layer * cellLayer, MenuIndex * cellIndex, void * data)
+{
+    switch (cellIndex->section) {
+    case 0:
+        switch (cellIndex->row) {
+        case 0: {
+            struct tm * tmTime = localtime(&startTimeOfWorkout);
+            char str[20];
+            strftime(str, 20, "%d.%m.%Y %H:%M:%S", tmTime);
+            menu_cell_basic_draw(ctx, cellLayer, "Start of swim", str, NULL);
+            break;
+        }
+        case 1: {
+            const int swimTime = endTimeOfWorkout - startTimeOfWorkout - cumulatedPauseTimeOfWorkout;
+            char str[10];
+            formtTime(str, 10, swimTime);
+            menu_cell_basic_draw(ctx, cellLayer, "Total swim time", str, NULL);
+            break;
+        }
+        case 2: {
+            const int swimTime = endTimeOfWorkout - startTimeOfWorkout - cumulatedPauseTimeOfWorkout;
+            const int avgTimePerLane = swimTime / laneCount;
+            char str[10];
+            formtTime(str, 10, avgTimePerLane);
+            menu_cell_basic_draw(ctx, cellLayer, "Time per Lane", str, NULL);
+            break;
+        }
+        case 3: {
+            char str[12];
+            snprintf(str, 12, "%d (%dm)", laneCount, laneCount*lengthOfLane);
+            menu_cell_basic_draw(ctx, cellLayer, "Lanes", str, NULL);
+            break;
+        }
+        case 4: {
+            char str[10];
+            formtTime(str, 10, cumulatedPauseTimeOfWorkout);
+            menu_cell_basic_draw(ctx, cellLayer, "Pause", str, NULL);
+            break;
+        }
+        }
+    }
+}
+
+static void onSummaryMenuWindowLoad(Window * window)
+{
+    // Now we prepare to initialize the menu layer
+    Layer * windowRootLayer = window_get_root_layer(window);
+    const GRect bounds = layer_get_frame(windowRootLayer);
+
+    // Create the menu layer
+    summaryMenuLayer = menu_layer_create(bounds);
+    menu_layer_set_callbacks(summaryMenuLayer, NULL, (MenuLayerCallbacks){
+                                 .get_num_sections  = NULL,
+                                 .get_num_rows      = onSummaryMenuGetNumRows,
+                                 .get_header_height = NULL,
+                                 .draw_header       = NULL,
+                                 .draw_row          = onSummaryMenuDrawRow,
+                                 .select_click      = NULL,
+                                 .get_cell_height   = NULL,
+                             });
+
+    menu_layer_set_click_config_onto_window(summaryMenuLayer, window);
+
+    layer_add_child(windowRootLayer, menu_layer_get_layer(summaryMenuLayer));
+}
+
+static void onSummaryMenuWindowUnload(Window * window)
+{
+    menu_layer_destroy(summaryMenuLayer);
+    summaryMenuLayer = NULL;
+}
+
+static void initSummaryMenuWindow()
+{
+    summaryMenuWindow = window_create();
+    window_set_window_handlers(summaryMenuWindow, (WindowHandlers){
+                                   .load   = onSummaryMenuWindowLoad,
+                                   .unload = onSummaryMenuWindowUnload,
+                               });
+}
+
+static void deinitSummaryMenuWindow()
+{
+    window_destroy(summaryMenuWindow);
 }
 
 //
@@ -506,9 +644,11 @@ int main(void)
 
     initMainMenuWindow();
     initDigitWindow();
+    initSummaryMenuWindow();
 
     app_event_loop();
 
+    deinitSummaryMenuWindow();
     deinitDigitWindow();
     deinitMainMenuWindow();
 
