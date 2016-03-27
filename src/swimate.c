@@ -65,6 +65,25 @@ static void updateDigitActionBarLayerIcons()
     action_bar_layer_set_icon_animated(digitActionBarLayer, BUTTON_ID_DOWN, iconOK, true);
 }
 
+static void quitCurrentSwim()
+{
+    // reset all
+    laneCount = 0;
+    startTimeOfCurrentLane  = 0;
+    cumulatedPauseTime = 0;
+    startTimeOfCurrentPause = 0;
+    virtualEndTimeOfCurrentLane = 0;
+
+    window_stack_pop(false);
+}
+
+static void onDigitActionBarLayerBackClicked(ClickRecognizerRef recognizer, void * context)
+{
+    showMessageBox("Really finish current swim?", quitCurrentSwim, 0,
+                   RESOURCE_ID_IMAGE_ACTION_ICON_OK,
+                   RESOURCE_ID_IMAGE_ACTION_ICON_NOK);
+}
+
 static void onDigitActionBarLayerSelectClicked(ClickRecognizerRef recognizer, void * context)
 {
     const bool isNowPaused = !isPaused();
@@ -151,6 +170,7 @@ static void onDigitActionBarLayerDownClicked(ClickRecognizerRef recognizer, void
 
 static void digitActionBarLayerClickConfigProvider(void * context)
 {
+    window_single_click_subscribe(BUTTON_ID_BACK,   (ClickHandler)onDigitActionBarLayerBackClicked);
     window_single_click_subscribe(BUTTON_ID_SELECT, (ClickHandler)onDigitActionBarLayerSelectClicked);
     window_single_click_subscribe(BUTTON_ID_DOWN,   (ClickHandler)onDigitActionBarLayerDownClicked);
 }
