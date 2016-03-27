@@ -43,6 +43,7 @@ static ActionBarLayer *digitActionBarLayer;
 
 int laneCount = 0;
 time_t startTimeOfWorkout  = 0;
+int timeOfPreviousLane = 0;
 time_t startTimeOfCurrentLane  = 0;
 int cumulatedPauseTimeOfWorkout = 0;
 int cumulatedPauseTimeOfCurrentLane = 0;
@@ -145,6 +146,7 @@ static void finishLane()
     }
     if (startTimeOfCurrentLane > 0) {
         timePerLane = now - startTimeOfCurrentLane - cumulatedPauseTimeOfCurrentLane;
+        timeOfPreviousLane = timePerLane;
     }
 }
 
@@ -172,9 +174,36 @@ static void startNextLane()
     updateTimeDigits();
 }
 
+static void restartCurrentLane()
+{
+    const time_t now = time(NULL);
+
+    // calculate next timePerLane
+    finishLane();
+
+    // start new lane
+    startTimeOfCurrentLane = now;
+    cumulatedPauseTimeOfCurrentLane = 0;
+
+    if (isPaused()) {
+        startTimeOfCurrentPause = now;
+    } else {
+        virtualEndTimeOfCurrentLane = startTimeOfCurrentLane + timePerLane;
+    }
+
+    vibes_long_pulse();
+    updateLaneDigits();
+    updateTimeDigits();
+}
+
 static void onDigitActionBarLayerDownClicked(ClickRecognizerRef recognizer, void * context)
 {
     startNextLane();
+}
+
+static void onDigitActionBarLayerDownDoubleClicked(ClickRecognizerRef recognizer, void * context)
+{
+    restartCurrentLane();
 }
 
 static void digitActionBarLayerClickConfigProvider(void * context)
@@ -182,6 +211,7 @@ static void digitActionBarLayerClickConfigProvider(void * context)
     window_single_click_subscribe(BUTTON_ID_BACK,   (ClickHandler)onDigitActionBarLayerBackClicked);
     window_single_click_subscribe(BUTTON_ID_SELECT, (ClickHandler)onDigitActionBarLayerSelectClicked);
     window_single_click_subscribe(BUTTON_ID_DOWN,   (ClickHandler)onDigitActionBarLayerDownClicked);
+    window_multi_click_subscribe(BUTTON_ID_DOWN, 2, 0, 0, true, (ClickHandler)onDigitActionBarLayerDownDoubleClicked);
 }
 
 static void handleSecondsTick(struct tm * tick_time, TimeUnits units_changed)
@@ -214,6 +244,7 @@ static void onDigitWindowLoad(Window * window)
     // reset all
     laneCount = 0;
     startTimeOfWorkout = time(NULL);
+    timeOfPreviousLane = timePerLane;
     startTimeOfCurrentLane  = 0;
     cumulatedPauseTimeOfWorkout = 0;
     cumulatedPauseTimeOfCurrentLane = 0;
