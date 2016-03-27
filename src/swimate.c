@@ -1,5 +1,6 @@
 #include "pebble.h"
 
+#include "clock_digit.h"
 #include "messagebox.h"
 
 // main menu stuff
@@ -27,9 +28,192 @@ static ActionBarLayer *actionBarLayer;
 static GBitmap * iconUp;
 static GBitmap * iconOK;
 static GBitmap * iconDown;
+static GBitmap * iconPlay;
+static GBitmap * iconPause;
+
+// digits window
+static Window * digitWindow;
+static ClockDigit clockDigits[4];
+static ActionBarLayer *digitActionBarLayer;
+
+int laneCount = 0;
+time_t startTimeOfCurrentLane  = 0;
+int cumulatedPauseTime = 0;
+time_t startTimeOfCurrentPause = 0;
+time_t virtualEndTimeOfCurrentLane = 0;
 
 // forward declarations
+static void finishLane();
+static void startNextLane();
 void setClickContextProviderForMainMenu(MenuLayer * menuLayer, Window * window);
+
+//
+// DigitWindow
+
+static bool isPaused()
+{
+    return startTimeOfCurrentPause > 0;
+}
+
+static void updateDigitActionBarLayerIcons()
+{
+    if (isPaused()) {
+        action_bar_layer_set_icon_animated(digitActionBarLayer, BUTTON_ID_SELECT, iconPlay, true);
+    } else {
+        action_bar_layer_set_icon_animated(digitActionBarLayer, BUTTON_ID_SELECT, iconPause, true);
+    }
+    action_bar_layer_set_icon_animated(digitActionBarLayer, BUTTON_ID_DOWN, iconOK, true);
+}
+
+static void onDigitActionBarLayerSelectClicked(ClickRecognizerRef recognizer, void * context)
+{
+    const bool isNowPaused = !isPaused();
+
+    const time_t now = time(NULL);
+    if (isNowPaused) {
+        startTimeOfCurrentPause = now;
+    } else {
+        cumulatedPauseTime += now - startTimeOfCurrentPause;
+        startTimeOfCurrentPause = 0;
+
+        virtualEndTimeOfCurrentLane = startTimeOfCurrentLane + timePerLane + cumulatedPauseTime;
+    }
+
+    updateDigitActionBarLayerIcons();
+}
+
+static void updateLaneDigits()
+{
+    ClockDigit_setNumber(&clockDigits[0], (laneCount/ 10) % 10, FONT_SETTING_DEFAULT);
+    ClockDigit_setNumber(&clockDigits[1],  laneCount      % 10, FONT_SETTING_DEFAULT);
+}
+
+static void updateTimeDigits()
+{
+    const time_t now = time(NULL);
+    int remaining = isPaused() ? virtualEndTimeOfCurrentLane + (now - startTimeOfCurrentPause) - now
+                               : virtualEndTimeOfCurrentLane - now;
+
+    if (remaining <= 0 && !isPaused()) {
+        startNextLane();
+        return;
+    }
+
+    ClockDigit_setNumber(&clockDigits[2], (remaining / 10) % 10, FONT_SETTING_BOLD);
+    ClockDigit_setNumber(&clockDigits[3],  remaining       % 10, FONT_SETTING_BOLD);
+
+    if (remaining <= 3 && !isPaused()) {
+        vibes_short_pulse();
+    }
+}
+
+static void finishLane()
+{
+    const time_t now = time(NULL);
+
+    // calculate next timePerLane
+    if (isPaused()) {
+        cumulatedPauseTime += now - startTimeOfCurrentPause;
+    }
+    if (startTimeOfCurrentLane > 0) {
+        timePerLane = now - startTimeOfCurrentLane - cumulatedPauseTime;
+    }
+}
+
+static void startNextLane()
+{
+    ++laneCount;
+
+    const time_t now = time(NULL);
+
+    // calculate next timePerLane
+    finishLane();
+
+    // start new lane
+    startTimeOfCurrentLane = now;
+    cumulatedPauseTime = 0;
+
+    if (isPaused()) {
+        startTimeOfCurrentPause = now;
+    } else {
+        virtualEndTimeOfCurrentLane = startTimeOfCurrentLane + timePerLane;
+    }
+
+    vibes_long_pulse();
+    updateLaneDigits();
+    updateTimeDigits();
+}
+
+static void onDigitActionBarLayerDownClicked(ClickRecognizerRef recognizer, void * context)
+{
+    startNextLane();
+}
+
+static void digitActionBarLayerClickConfigProvider(void * context)
+{
+    window_single_click_subscribe(BUTTON_ID_SELECT, (ClickHandler)onDigitActionBarLayerSelectClicked);
+    window_single_click_subscribe(BUTTON_ID_DOWN,   (ClickHandler)onDigitActionBarLayerDownClicked);
+}
+
+static void handleSecondsTick(struct tm * tick_time, TimeUnits units_changed)
+{
+    updateTimeDigits();
+}
+
+static void onDigitWindowLoad(Window * window)
+{
+    GPoint digitPoints[4] = {GPoint(7, 7), GPoint(60, 7), GPoint(7, 90), GPoint(60, 90)};
+
+    for(int i = 0; i < 4; i++) {
+        ClockDigit_construct(&clockDigits[i], digitPoints[i]);
+    }
+
+    Layer * windowRootLayer = window_get_root_layer(window);
+    for(int i = 0; i < 4; i++) {
+        //ClockDigit_setColor(&clockDigits[i], GColorBlack, GColorWhite);
+        layer_add_child(windowRootLayer, bitmap_layer_get_layer(clockDigits[i].imageLayer));
+    }
+
+    // Initialize the action bar:
+    digitActionBarLayer = action_bar_layer_create();
+    action_bar_layer_set_click_config_provider(digitActionBarLayer, digitActionBarLayerClickConfigProvider);
+
+    updateDigitActionBarLayerIcons();
+
+    action_bar_layer_add_to_window(digitActionBarLayer, window);
+
+    if (!isPaused()) {
+        startNextLane();
+    }
+    tick_timer_service_subscribe(SECOND_UNIT, &handleSecondsTick);
+}
+
+static void onDigitWindowUnload(Window * window)
+{
+    tick_timer_service_unsubscribe();
+
+    action_bar_layer_destroy(digitActionBarLayer);
+    digitActionBarLayer = NULL;
+
+    for(int i = 0; i < 4; i++) {
+        ClockDigit_destruct(&clockDigits[i]);
+    }
+}
+
+static void initDigitWindow()
+{
+    digitWindow = window_create();
+    window_set_window_handlers(digitWindow, (WindowHandlers){
+                                   .load   = onDigitWindowLoad,
+                                   .unload = onDigitWindowUnload,
+                               });
+}
+
+static void deinitDigitWindow()
+{
+    window_destroy(digitWindow);
+    digitWindow = NULL;
+}
 
 //
 // MenuLayer
@@ -112,6 +296,9 @@ static void onMainMenuMenuSelect(MenuLayer * menuLayer, MenuIndex * cellIndex, v
             currentValueToChange = &timePerLane;
             action_bar_layer_add_to_window(actionBarLayer, mainMenuWindow);
             break;
+        case 2:
+            window_stack_push(digitWindow, true);
+            break;
         }
         break;
     case 1:
@@ -150,7 +337,7 @@ static void onActionBarLayerDownClicked(ClickRecognizerRef recognizer, void * co
     layer_mark_dirty(menu_layer_get_layer(mainMenuLayer));
 }
 
-static void click_config_provider(void * context)
+static void actionBarLayerClickConfigProvider(void * context)
 {
     window_single_click_subscribe(BUTTON_ID_BACK,                (ClickHandler)onActionBarLayerBackClicked);
     window_single_click_subscribe(BUTTON_ID_SELECT,              (ClickHandler)onActionBarLayerBackClicked);
@@ -217,7 +404,7 @@ static void onMainMenuWindowLoad(Window * window)
 
     // Initialize the action bar:
     actionBarLayer = action_bar_layer_create();
-    action_bar_layer_set_click_config_provider(actionBarLayer, click_config_provider);
+    action_bar_layer_set_click_config_provider(actionBarLayer, actionBarLayerClickConfigProvider);
 
     action_bar_layer_set_icon_animated(actionBarLayer, BUTTON_ID_UP,     iconUp,   true);
     action_bar_layer_set_icon_animated(actionBarLayer, BUTTON_ID_SELECT, iconOK,   true);
@@ -270,9 +457,11 @@ static void writePersistentSettings()
 
 static void initIcons()
 {
-    iconUp   = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ACTION_ICON_UP);
-    iconOK   = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ACTION_ICON_OK);
-    iconDown = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ACTION_ICON_DOWN);
+    iconUp    = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ACTION_ICON_UP);
+    iconOK    = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ACTION_ICON_OK);
+    iconDown  = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ACTION_ICON_DOWN);
+    iconPlay  = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ACTION_ICON_PLAY);
+    iconPause = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_ACTION_ICON_PAUSE);
 }
 
 static void deinitIcons()
@@ -280,10 +469,14 @@ static void deinitIcons()
     gbitmap_destroy(iconUp);
     gbitmap_destroy(iconOK);
     gbitmap_destroy(iconDown);
+    gbitmap_destroy(iconPlay);
+    gbitmap_destroy(iconPause);
 
-    iconUp   = NULL;
-    iconOK   = NULL;
-    iconDown = NULL;
+    iconUp    = NULL;
+    iconOK    = NULL;
+    iconDown  = NULL;
+    iconPlay  = NULL;
+    iconPause = NULL;
 }
 
 int main(void)
@@ -292,7 +485,11 @@ int main(void)
     initIcons();
 
     initMainMenuWindow();
+    initDigitWindow();
+
     app_event_loop();
+
+    deinitDigitWindow();
     deinitMainMenuWindow();
 
     deinitIcons();

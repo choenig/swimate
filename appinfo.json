@@ -30,6 +30,16 @@
                 "file": "images/action_icon_down.png"
             },
             {
+                "type": "bitmap",
+                "name": "IMAGE_ACTION_ICON_PLAY",
+                "file": "images/action_icon_play.png"
+            },
+            {
+                "type": "bitmap",
+                "name": "IMAGE_ACTION_ICON_PAUSE",
+                "file": "images/action_icon_pause.png"
+            },
+            {
                 "file": "images/digit_0.png",
                 "name": "CLOCK_DIGIT_0",
                 "type": "bitmap"
