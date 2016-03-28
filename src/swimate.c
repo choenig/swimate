@@ -66,7 +66,8 @@ time_t lastWorkoutEndTimeOfWorkout  = 0;
 // forward declarations
 static void startNextLane();
 static void finishLane();
-void setClickContextProviderForMainMenu(MenuLayer * menuLayer, Window * window);
+static void continueCurrentSwim();
+static void setClickContextProviderForMainMenu(MenuLayer * menuLayer, Window * window);
 
 //
 // DigitWindow
@@ -107,19 +108,12 @@ static void quitCurrentSwim()
     window_stack_push(summaryMenuWindow, true);
 }
 
-static void onDigitActionBarLayerBackClicked(ClickRecognizerRef recognizer, void * context)
+static void setPaused(bool paused)
 {
-    showMessageBox("Really finish current swim?", quitCurrentSwim, 0,
-                   RESOURCE_ID_IMAGE_ACTION_ICON_OK,
-                   RESOURCE_ID_IMAGE_ACTION_ICON_NOK);
-}
-
-static void onDigitActionBarLayerSelectClicked(ClickRecognizerRef recognizer, void * context)
-{
-    const bool isNowPaused = !isPaused();
+    if (paused == isPaused()) return;
 
     const time_t now = time(NULL);
-    if (isNowPaused) {
+    if (paused) {
         startTimeOfCurrentPause = now;
     } else {
         cumulatedPauseTimeOfWorkout     += now - startTimeOfCurrentPause;
@@ -132,10 +126,33 @@ static void onDigitActionBarLayerSelectClicked(ClickRecognizerRef recognizer, vo
     updateDigitActionBarLayerIcons();
 }
 
+static void onDigitActionBarLayerBackClicked(ClickRecognizerRef recognizer, void * context)
+{
+    setPaused(true);
+    showMessageBox("Really finish current swim?", quitCurrentSwim, continueCurrentSwim,
+                   RESOURCE_ID_IMAGE_ACTION_ICON_OK, RESOURCE_ID_IMAGE_ACTION_ICON_NOK);
+}
+
+static void onDigitActionBarLayerSelectClicked(ClickRecognizerRef recognizer, void * context)
+{
+    setPaused(!isPaused());
+}
+
 static void updateLaneDigits()
 {
     ClockDigit_setNumber(&clockDigits[0], (laneCount/ 10) % 10, FONT_SETTING_DEFAULT);
     ClockDigit_setNumber(&clockDigits[1],  laneCount      % 10, FONT_SETTING_DEFAULT);
+}
+
+static void continueCurrentSwim()
+{
+    setPaused(false);
+}
+
+static void continueCurrentSwimInNextLane()
+{
+    continueCurrentSwim();
+    startNextLane();
 }
 
 static void updateTimeDigits()
@@ -145,6 +162,12 @@ static void updateTimeDigits()
                                : virtualEndTimeOfCurrentLane - now;
 
     if (remaining <= 0 && !isPaused()) {
+        if (laneCount == desiredLaneCount) {
+            setPaused(true);
+            showMessageBox("Yeah, workout finished :-). Quit swim?", quitCurrentSwim, continueCurrentSwimInNextLane,
+                           RESOURCE_ID_IMAGE_ACTION_ICON_OK, RESOURCE_ID_IMAGE_ACTION_ICON_NOK);
+            return;
+        }
         startNextLane();
         return;
     }
@@ -153,7 +176,11 @@ static void updateTimeDigits()
     ClockDigit_setNumber(&clockDigits[3],  remaining       % 10, FONT_SETTING_BOLD);
 
     if (remaining <= 3 && !isPaused()) {
-        vibes_short_pulse();
+        if (laneCount == desiredLaneCount) {
+            vibes_long_pulse();
+        } else {
+            vibes_short_pulse();
+        }
     }
 }
 
