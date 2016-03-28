@@ -52,8 +52,8 @@ time_t virtualEndTimeOfCurrentLane = 0;
 time_t endTimeOfWorkout  = 0;
 
 // forward declarations
-static void finishLane();
 static void startNextLane();
+static void finishLane();
 void setClickContextProviderForMainMenu(MenuLayer * menuLayer, Window * window);
 
 //
@@ -135,21 +135,6 @@ static void updateTimeDigits()
     }
 }
 
-static void finishLane()
-{
-    const time_t now = time(NULL);
-
-    // calculate next timePerLane
-    if (isPaused()) {
-        cumulatedPauseTimeOfWorkout     += now - startTimeOfCurrentPause;
-        cumulatedPauseTimeOfCurrentLane += now - startTimeOfCurrentPause;
-    }
-    if (startTimeOfCurrentLane > 0) {
-        timePerLane = now - startTimeOfCurrentLane - cumulatedPauseTimeOfCurrentLane;
-        timeOfPreviousLane = timePerLane;
-    }
-}
-
 static void startNextLane()
 {
     ++laneCount;
@@ -172,6 +157,21 @@ static void startNextLane()
     vibes_long_pulse();
     updateLaneDigits();
     updateTimeDigits();
+}
+
+static void finishLane()
+{
+    const time_t now = time(NULL);
+
+    // calculate next timePerLane
+    if (isPaused()) {
+        cumulatedPauseTimeOfWorkout     += now - startTimeOfCurrentPause;
+        cumulatedPauseTimeOfCurrentLane += now - startTimeOfCurrentPause;
+    }
+    if (startTimeOfCurrentLane > 0) {
+        timePerLane = now - startTimeOfCurrentLane - cumulatedPauseTimeOfCurrentLane;
+        timeOfPreviousLane = timePerLane;
+    }
 }
 
 static void restartCurrentLane()
