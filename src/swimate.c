@@ -98,6 +98,11 @@ static void quitCurrentSwim()
     lastWorkoutCumulatedPauseTimeOfWorkout = cumulatedPauseTimeOfWorkout;
     lastWorkoutEndTimeOfWorkout            = now;
 
+    // calculate average swim time and set timePerLane
+    const int swimTime = lastWorkoutEndTimeOfWorkout - lastWorkoutStartTimeOfWorkout - lastWorkoutCumulatedPauseTimeOfWorkout;
+    const int avgTimePerLane = swimTime / lastWorkoutLaneCount;
+    timePerLane = avgTimePerLane;
+
     window_stack_pop(false);
     window_stack_push(summaryMenuWindow, true);
 }
@@ -337,6 +342,7 @@ static void formtTime(char * str, size_t maxlen, time_t time)
 static void onSummaryMenuDrawRow(GContext* ctx, const Layer * cellLayer, MenuIndex * cellIndex, void * data)
 {
     const int swimTime = lastWorkoutEndTimeOfWorkout - lastWorkoutStartTimeOfWorkout - lastWorkoutCumulatedPauseTimeOfWorkout;
+    const int avgTimePerLane = swimTime / lastWorkoutLaneCount;
 
     switch (cellIndex->section) {
     case 0:
@@ -355,7 +361,6 @@ static void onSummaryMenuDrawRow(GContext* ctx, const Layer * cellLayer, MenuInd
             break;
         }
         case 2: {
-            const int avgTimePerLane = swimTime / lastWorkoutLaneCount;
             char str[10];
             formtTime(str, 10, avgTimePerLane);
             menu_cell_basic_draw(ctx, cellLayer, "Time per Lane", str, NULL);
