@@ -4,17 +4,23 @@
 #include "messagebox.h"
 
 // main menu stuff
-#define NUM_MENU_SECTIONS 2
-#define NUM_FIRST_MENU_ITEMS 3
-#define NUM_SECOND_MENU_ITEMS 1
+#define NUM_MENU_SECTIONS 3
+#define NUM_1ST_MENU_ITEMS 3
+#define NUM_2ND_MENU_ITEMS 1
+#define NUM_3RD_MENU_ITEMS 1
 
 // summary menu stuff
-#define NUM_SUMMARY_MENU_ITEMS 5
+#define NUM_SUMMARY_MENU_ITEMS 6
 
 // settings keys
 #define PERSIST_KEY_DESIRED_LANE_COUNT 0
 #define PERSIST_KEY_TIME_PER_LANE      1
 #define PERSIST_KEY_LENGTH_OF_LANE     2
+#define PERSIST_KEY_LAST_WORKOUT_LENGTH_OF_LANE   3
+#define PERSIST_KEY_LAST_WORKOUT_LANE_COUNT       4
+#define PERSIST_KEY_LAST_WORKOUT_START_OF_WORKOUT 5
+#define PERSIST_KEY_LAST_WORKOUT_CUMULATIVE_PAUSE 6
+#define PERSIST_KEY_LAST_WORKOUT_END_OF_WORKOUT   7
 
 // settings variables
 static int desiredLaneCount = 40;
@@ -49,7 +55,13 @@ int cumulatedPauseTimeOfWorkout = 0;
 int cumulatedPauseTimeOfCurrentLane = 0;
 time_t startTimeOfCurrentPause = 0;
 time_t virtualEndTimeOfCurrentLane = 0;
-time_t endTimeOfWorkout  = 0;
+
+// values from last workout
+int    lastWorkoutLengthOfLane = 0;
+int    lastWorkoutLaneCount = 0;
+time_t lastWorkoutStartTimeOfWorkout  = 0;
+int    lastWorkoutCumulatedPauseTimeOfWorkout = 0;
+time_t lastWorkoutEndTimeOfWorkout  = 0;
 
 // forward declarations
 static void startNextLane();
@@ -78,8 +90,13 @@ static void quitCurrentSwim()
 {
     finishLane();
 
+    // remember last workout
     const time_t now = time(NULL);
-    endTimeOfWorkout = now;
+    lastWorkoutLengthOfLane                = lengthOfLane;
+    lastWorkoutLaneCount                   = laneCount;
+    lastWorkoutStartTimeOfWorkout          = startTimeOfWorkout;
+    lastWorkoutCumulatedPauseTimeOfWorkout = cumulatedPauseTimeOfWorkout;
+    lastWorkoutEndTimeOfWorkout            = now;
 
     window_stack_pop(false);
     window_stack_push(summaryMenuWindow, true);
@@ -250,7 +267,6 @@ static void onDigitWindowLoad(Window * window)
     cumulatedPauseTimeOfCurrentLane = 0;
     startTimeOfCurrentPause = 0;
     virtualEndTimeOfCurrentLane = 0;
-    endTimeOfWorkout = 0;
     startNextLane();
 
     tick_timer_service_subscribe(SECOND_UNIT, &handleSecondsTick);
@@ -320,26 +336,26 @@ static void formtTime(char * str, size_t maxlen, time_t time)
 
 static void onSummaryMenuDrawRow(GContext* ctx, const Layer * cellLayer, MenuIndex * cellIndex, void * data)
 {
+    const int swimTime = lastWorkoutEndTimeOfWorkout - lastWorkoutStartTimeOfWorkout - lastWorkoutCumulatedPauseTimeOfWorkout;
+
     switch (cellIndex->section) {
     case 0:
         switch (cellIndex->row) {
         case 0: {
-            struct tm * tmTime = localtime(&startTimeOfWorkout);
+            struct tm * tmTime = localtime(&lastWorkoutStartTimeOfWorkout);
             char str[20];
             strftime(str, 20, "%d.%m.%Y %H:%M:%S", tmTime);
             menu_cell_basic_draw(ctx, cellLayer, "Start of swim", str, NULL);
             break;
         }
         case 1: {
-            const int swimTime = endTimeOfWorkout - startTimeOfWorkout - cumulatedPauseTimeOfWorkout;
             char str[10];
             formtTime(str, 10, swimTime);
             menu_cell_basic_draw(ctx, cellLayer, "Total swim time", str, NULL);
             break;
         }
         case 2: {
-            const int swimTime = endTimeOfWorkout - startTimeOfWorkout - cumulatedPauseTimeOfWorkout;
-            const int avgTimePerLane = swimTime / laneCount;
+            const int avgTimePerLane = swimTime / lastWorkoutLaneCount;
             char str[10];
             formtTime(str, 10, avgTimePerLane);
             menu_cell_basic_draw(ctx, cellLayer, "Time per Lane", str, NULL);
@@ -347,14 +363,21 @@ static void onSummaryMenuDrawRow(GContext* ctx, const Layer * cellLayer, MenuInd
         }
         case 3: {
             char str[12];
-            snprintf(str, 12, "%d (%dm)", laneCount, laneCount*lengthOfLane);
+            snprintf(str, 12, "%d (%dm)", lastWorkoutLaneCount, lastWorkoutLaneCount*lastWorkoutLengthOfLane);
             menu_cell_basic_draw(ctx, cellLayer, "Lanes", str, NULL);
             break;
         }
         case 4: {
             char str[10];
-            formtTime(str, 10, cumulatedPauseTimeOfWorkout);
+            formtTime(str, 10, lastWorkoutCumulatedPauseTimeOfWorkout);
             menu_cell_basic_draw(ctx, cellLayer, "Pause", str, NULL);
+            break;
+        }
+        case 5: {
+            struct tm * tmTime = localtime(&lastWorkoutEndTimeOfWorkout);
+            char str[20];
+            strftime(str, 20, "%d.%m.%Y %H:%M:%S", tmTime);
+            menu_cell_basic_draw(ctx, cellLayer, "End of swim", str, NULL);
             break;
         }
         }
@@ -415,8 +438,9 @@ static uint16_t onMainMenuGetNumSections(MenuLayer * menuLayer, void * data)
 static uint16_t onMainMenuGetNumRows(MenuLayer * menuLayer, uint16_t sectionIndex, void * data)
 {
     switch (sectionIndex) {
-    case 0:  return NUM_FIRST_MENU_ITEMS;
-    case 1:  return NUM_SECOND_MENU_ITEMS;
+    case 0:  return NUM_1ST_MENU_ITEMS;
+    case 1:  return NUM_2ND_MENU_ITEMS;
+    case 2:  return NUM_3RD_MENU_ITEMS;
     default: return 0;
     }
 }
@@ -433,6 +457,9 @@ static void onMainMenuDrawHeader(GContext * ctx, const Layer * cellLayer, uint16
         menu_cell_basic_header_draw(ctx, cellLayer, "New swim");
         break;
     case 1:
+        menu_cell_basic_header_draw(ctx, cellLayer, "Last Workout");
+        break;
+    case 2:
         menu_cell_basic_header_draw(ctx, cellLayer, "Setup");
         break;
     }
@@ -463,12 +490,21 @@ static void onMainMenuDrawRow(GContext* ctx, const Layer * cellLayer, MenuIndex 
     case 1:
         switch (cellIndex->row) {
         case 0: {
+            menu_cell_basic_draw(ctx, cellLayer, "Show last swim", NULL, NULL);
+            break;
+        }
+        }
+        break;
+    case 2:
+        switch (cellIndex->row) {
+        case 0: {
             char str[4];
             snprintf(str, 4, "%dm", lengthOfLane);
             menu_cell_basic_draw(ctx, cellLayer, "Length of lane", str, NULL);
             break;
         }
         }
+        break;
     }
 }
 
@@ -491,6 +527,13 @@ static void onMainMenuMenuSelect(MenuLayer * menuLayer, MenuIndex * cellIndex, v
         }
         break;
     case 1:
+        switch (cellIndex->row) {
+        case 0:
+            window_stack_push(summaryMenuWindow, true);
+            break;
+        }
+        break;
+    case 2:
         switch (cellIndex->row) {
         case 0:
             if (lengthOfLane == 25) lengthOfLane = 50;
@@ -624,24 +667,31 @@ static void deinitMainMenuWindow()
     window_destroy(mainMenuWindow);
 }
 
+#define readPersistInt(key, variable) \
+    do { if (persist_exists(key)) variable = persist_read_int(key); } while (0)
+
 static void readPersistentSettings()
 {
-    if (persist_exists(PERSIST_KEY_DESIRED_LANE_COUNT)) {
-        desiredLaneCount = persist_read_int(PERSIST_KEY_DESIRED_LANE_COUNT);
-    }
-    if (persist_exists(PERSIST_KEY_TIME_PER_LANE)) {
-        timePerLane = persist_read_int(PERSIST_KEY_TIME_PER_LANE);
-    }
-    if (persist_exists(PERSIST_KEY_LENGTH_OF_LANE)) {
-        lengthOfLane = persist_read_int(PERSIST_KEY_LENGTH_OF_LANE);
-    }
+    readPersistInt(PERSIST_KEY_DESIRED_LANE_COUNT,            desiredLaneCount);
+    readPersistInt(PERSIST_KEY_TIME_PER_LANE,                 timePerLane);
+    readPersistInt(PERSIST_KEY_LENGTH_OF_LANE,                lengthOfLane);
+    readPersistInt(PERSIST_KEY_LAST_WORKOUT_LENGTH_OF_LANE,   lastWorkoutLengthOfLane);
+    readPersistInt(PERSIST_KEY_LAST_WORKOUT_LANE_COUNT,       lastWorkoutLaneCount);
+    readPersistInt(PERSIST_KEY_LAST_WORKOUT_START_OF_WORKOUT, lastWorkoutStartTimeOfWorkout);
+    readPersistInt(PERSIST_KEY_LAST_WORKOUT_CUMULATIVE_PAUSE, lastWorkoutCumulatedPauseTimeOfWorkout);
+    readPersistInt(PERSIST_KEY_LAST_WORKOUT_END_OF_WORKOUT,   lastWorkoutEndTimeOfWorkout);
 }
 
 static void writePersistentSettings()
 {
-    persist_write_int(PERSIST_KEY_DESIRED_LANE_COUNT, desiredLaneCount);
-    persist_write_int(PERSIST_KEY_TIME_PER_LANE,      timePerLane);
-    persist_write_int(PERSIST_KEY_LENGTH_OF_LANE,     lengthOfLane);
+    persist_write_int(PERSIST_KEY_DESIRED_LANE_COUNT,            desiredLaneCount);
+    persist_write_int(PERSIST_KEY_TIME_PER_LANE,                 timePerLane);
+    persist_write_int(PERSIST_KEY_LENGTH_OF_LANE,                lengthOfLane);
+    persist_write_int(PERSIST_KEY_LAST_WORKOUT_LENGTH_OF_LANE,   lastWorkoutLengthOfLane);
+    persist_write_int(PERSIST_KEY_LAST_WORKOUT_LANE_COUNT,       lastWorkoutLaneCount);
+    persist_write_int(PERSIST_KEY_LAST_WORKOUT_START_OF_WORKOUT, lastWorkoutStartTimeOfWorkout);
+    persist_write_int(PERSIST_KEY_LAST_WORKOUT_CUMULATIVE_PAUSE, lastWorkoutCumulatedPauseTimeOfWorkout);
+    persist_write_int(PERSIST_KEY_LAST_WORKOUT_END_OF_WORKOUT,   lastWorkoutEndTimeOfWorkout);
 }
 
 static void initIcons()
